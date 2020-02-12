@@ -2,6 +2,9 @@
 
 ![alternativetext](schematic.png)
 
+
+## Summary of files:
+
 PreProcessing.R : (i) MULTI-seq and Cell Hashing FASTQ pre-processing, (ii) Gene expression data pre-processing using Seurat, (iii) Gene expression data QC, (iv) DoubletFinder, (v) Cell type annotation, (vi) Figure S1 visualizations.
 
 SampleClassification.R : (i) deMULTIplex classification for MULTI-seq and Cell Hashing count matrices, (ii) demuxEM classification for MULTI-seq and Cell Hashing count matrices, (iii) souporcell in silico genotyping, (iv) Figure 2 visualizations.
