@@ -1,4 +1,4 @@
-# Analysis and visualization code for McGinnis et al., "No detectable alloreactive transcriptional responses during donor-multiplexed single-cell RNA sequencing of peripheral blood mononuclear cells." 
+# Companion code for PBMC Alloreactivity Manuscript
 
 ![alternativetext](schematic.png)
 
