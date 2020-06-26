@@ -1,11 +1,15 @@
-######################################################
-## Part 2: MULTI-seq and CellHashing Demultiplexing ##
-## Chris McGinnis, Gartner Lab, UCSF, 01/21/2020 #####
-######################################################
+############################################################
+## In silico genotyping and MULTI-seq/SCMK Demultiplexing ##
+## for 8-donor, 7-donor, and Zheng et al PBMC datasets #####
+## Chris McGinnis, Gartner Lab, UCSF, 06/26/2020 ###########
+############################################################
 
 library(deMULTIplex)
 
-## Step 1: MULTI-seq classification for cells passing QC --------------------------------------------------------------------------------------------
+##################
+## 8-Donor PBMC ##
+##################
+## Step 1: MULTI-seq classification for cells passing QC --------------------------------------------------------------------------------------------------------------------------
 ## Lane 2
 cells <- unlist(strsplit(rownames(seu_pbmc_clean@meta.data)[which(seu_pbmc_clean@meta.data$LaneID == 2)], split="-2"))
 bar.table <- barTable_l2_multi[cells, 1:4]
@@ -68,12 +72,12 @@ neg.cells <- c(neg.cells, names(round2.calls)[which(round2.calls == "Negative")]
 final.calls_l3_multi <- c(round2.calls, rep("Negative",length(neg.cells)))
 names(final.calls_l3_multi) <- c(names(round2.calls),neg.cells)
 
-## Record results
+
+## Step 2: Record results, convert to donor IDs  ----------------------------------------------------------------------------------------------------------------------------------
 seu_pbmc_clean@meta.data[,"MULTI"] <- rep("none")
 seu_pbmc_clean@meta.data[names(final.calls_multi_l2),"MULTI"] <- final.calls_multi_l2
 seu_pbmc_clean@meta.data[names(final.calls_multi_l3),"MULTI"] <- final.calls_multi_l3
 
-## Convert to donor IDs
 seu_pbmc_clean@meta.data[,"Donor"] <- rep("A")
 seu_pbmc_clean@meta.data$Donor[which(seu_pbmc_clean@meta.data$MULTI == "Bar1")] <- "A"
 seu_pbmc_clean@meta.data$Donor[which(seu_pbmc_clean@meta.data$LaneID %in% c(1,4))] <- "A"
@@ -85,7 +89,8 @@ seu_pbmc_clean@meta.data$Donor[which(seu_pbmc_clean@meta.data$MULTI == "Bar6")] 
 seu_pbmc_clean@meta.data$Donor[which(seu_pbmc_clean@meta.data$MULTI == "Bar7")] <- "G"
 seu_pbmc_clean@meta.data$Donor[which(seu_pbmc_clean@meta.data$MULTI == "Bar8")] <- "H"
 
-## Step 2: HashTag classification for cells passing QC -------------------------------------------------------------------------------------------------------------------
+
+## Step 3: SCMK classification for cells passing QC -------------------------------------------------------------------------------------------------------------------------------
 ## Lane 2
 bar.table <- barTable_l2_hash[unlist(strsplit(rownames(seu_pbmc_clean@meta.data)[which(seu_pbmc_clean@meta.data$LaneID == 2)], split="-2")),9:12]
 bar.table_sweep.list <- list()
@@ -176,15 +181,13 @@ seu_pbmc_clean@meta.data[names(final.calls_l2_hash),"HASH"] <- final.calls_l2_ha
 seu_pbmc_clean@meta.data[names(final.calls_l3_hash),"HASH"] <- final.calls_l3_hash
 
 
-## Step 3: Compute barcode space for lane 3 cells ---------------------------------------------------------------------------------------------------
+## Step 4: Compute barcode space for lane 3 cells ---------------------------------------------------------------------------------------------------------------------------------
 barTSNE_multi <- barTSNE(barTable_l3_multi[names(final.calls_l3_multi), 1:8])
 barTSNE_hash <- barTSNE(barTable_l3_hash[names(final.calls_l3_multi), 1:8])
-
-## Add classification results
 barTSNE_multi[,"MULTI"] <- final.calls_l3_multi
 barTSNE_hash[,"MULTI"] <- final.calls_l3_hash
 
-## Step 4: souporcell classification ----------------------------------------------------------------------------------------------------------------
+## Step 5: souporcell classification ----------------------------------------------------------------------------------------------------------------------------------------------
 ## Specify lane 3 cells
 cellIDs_souporcell <- rownames(seu_pbmc_clean@meta.data)[which(seu_pbmc@meta.data$LaneID == 3)]
 cellIDs_souporcell <- paste(unlist(strsplit(cellIDs_souporcell, split="-3")), "-1", sep="")
@@ -200,51 +203,82 @@ rownames(souporcell) <- souporcell$barcode
 barTSNE_multi[,"SOUP"] <- souporcell[rownames(barTSNE_multi),"assignment"]
 barTSNE_hash[,"SOUP"] <- souporcell[rownames(barTSNE_hash),"assignment"]
 
+##################
+## 7-Donor PBMC ##
+##################
+## Step 1: Read in BD SCMK counts -------------------------------------------------------------------------------------------------------------------------------------------------
+bd.raw <- Read10X('.')
+bd.raw <- bd.raw[,rownames(seu_gh@meta.data)]
+bd.raw <- t(as.data.frame(bd.raw))
+bd.raw <- bd.raw[,1:7]
+library(deMULTIplex)
+bd.tsne <- barTSNE(bd.raw)
+ggplot(bd.tsne, aes(x=TSNE1, y=TSNE2)) + geom_point() + theme_void() + scale_color_virids()
 
+## Step 2: Perform Classification -------------------------------------------------------------------------------------------------------------------------------------------------
+bar.table <- bd.raw
+bar.table_sweep.list <- list()
+n <- 0
+for (q in seq(0.01, 0.99, by=0.02)) {
+  print(q)
+  n <- n + 1
+  bar.table_sweep.list[[n]] <- classifyCells(bar.table, q=q)
+  names(bar.table_sweep.list)[n] <- paste("q=",q,sep="")
+}
+res_round1 <- findThresh(call.list=bar.table_sweep.list)
+round1.calls <- classifyCells(bar.table, q=findQ(res_round1$res, res_round1$extrema))
+neg.cells <- names(round1.calls)[which(round1.calls == "Negative")]
 
-## Step 4: demuxEM classification ----------------------------------------------------------------------------------------------------------------
-barTable_multi_EM <- t(barTable_multi_EM) ## rows = BCs, cols = cells
-barTable_hash_EM <- t(barTable_hash_EM)
-write.csv(barTable_multi_EM, file="barTable_multi_EM.csv", quote=F, row.names=T)
-write.csv(barTable_hash_EM, file="barTable_hash_EM.csv", quote=F, row.names=T)
+ggplot(data=res_round1$res, aes(x=q, y=Proportion, color=Subset)) + 
+  geom_line() + 
+  theme(legend.position = "none") +
+  geom_vline(xintercept=res_round1$extrema, lty=2) + 
+  scale_color_manual(values=c("red","black","blue"))
 
-...
+bar.table <- bar.table[-which(rownames(bar.table) %in% neg.cells), ]
+bar.table_sweep.list <- list()
+n <- 0
+for (q in seq(0.01, 0.99, by=0.02)) {
+  print(q)
+  n <- n + 1
+  bar.table_sweep.list[[n]] <- classifyCells(bar.table, q=q)
+  names(bar.table_sweep.list)[n] <- paste("q=",q,sep="")
+}
+res_round2 <- findThresh(call.list=bar.table_sweep.list)
+round2.calls <- classifyCells(bar.table, q=findQ(res_round2$res, res_round2$extrema))
+neg.cells <- c(neg.cells, names(round2.calls)[which(round2.calls == "Negative")])
 
+ggplot(data=res_round2$res, aes(x=q, y=Proportion, color=Subset)) + 
+  geom_line() + 
+  theme(legend.position = "none") +
+  geom_vline(xintercept=res_round2$extrema, lty=2) + 
+  scale_color_manual(values=c("red","black","blue"))
 
-barTSNE_multi[,"DEMUX"] <- ...
-barTSNE_hash[,"DEMUX"] <- ...
+final.calls <- c(round2.calls, rep("Negative",length(neg.cells)))
+names(final.calls) <- c(names(round2.calls),neg.cells)
+final.calls <- final.calls[-which(duplicated(final.calls) == F)]
 
+seu_gh@meta.data[,"class"] <- rep("Negative")
+seu_gh@meta.data[names(final.calls),"class"] <- final.calls
 
-####################
-## Visualizations ##
-####################
-## Fig. 2A: Barcode tSNEs colored by (i) deMULTIplex, (ii) demuxEM, and (iii) souporcell
-ggplot(barTSNE_multi, aes(x=TSNE1, y=TSNE2, color=MULTI)) + 
-  geom_point(size=0.5) +
-  scale_color_manual(values=c("#a6cee3","#1f78b4","#b2df8a","#33a02c","black","#fb9a99","#e31a1c","#fdbf6f","#ff7f00","black")) +
-  theme(legend.position = "none", 
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(), 
-        axis.line = element_line(colour = "black"))
+######################
+## Zheng et al PBMC ##
+######################
+cellIDs_XY <- rownames(seu_zheng_clean@meta.data)[which(seu_zheng_clean@meta.data$LaneID == 1)]
+write.csv(cellIDs_XY, file="cellIDs_XY.tsv", quote=F, row.names = F)
 
-## Fig. 2B: Cell Hashing negative proportion aacross PBMC cell types
-temp <- seu_pbmc_ficoll@meta.data[which(seu_pbmc_ficoll@meta.data$LaneID == "3"), c("CellType","HASH")]
-temp$HASH[which(temp$HASH %ni% c("Doublet","Negative"))] <- "Singlet"
-temp$HASH <- factor(temp$HASH, levels=c("Singlet","Negative","Doublet"))
-temp$CellType <- factor(temp$CellType, levels=c("CD4T","CD8T","NK","B","CD14Mono","DC","CD16Mono","pDC"))
-ggplot(temp[which(temp$CellType != "pDC" & temp$HASH != "Doublet"), ], aes(x=CellType, fill=HASH)) +
-  geom_bar(position = "fill", alpha=0.8) +
-  scale_y_continuous(labels = scales::percent) +
-  scale_fill_manual(values=c("black","red")) +
-  theme(legend.position = "none", 
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(), 
-        axis.line = element_line(colour = "black"))
+singularity exec souporcell.sif souporcell_pipeline.py -i possorted_genome_bam.bam -b cellIDs_XY.tsv -f hg19-3.0.0-genome.fa -t 16 -o BC5050 -k 2
 
-## Fig. 2C: Distribution of Cell Hashing negatives in CD4+ T-cell space
-seu_CD4T_ficoll[,"Fig1D"] <- seu_CD4T_ficoll@meta.data$CD4TSubset
-seu_CD4T_ficoll$Fig1D[which(seu_CD4T_ficoll@meta.data$HASH == "Negative")] <- "negative"
-DimPlot(seu_CD4T_ficoll, group.by="Fig1D", cols=c("grey","beige","grey","black","red"), order="negative") + NoLegend()
+souporcell_XY <- read.table("./soup/clusters.tsv", sep="\t", header=T)
+souporcell_XY$barcode <- as.character(souporcell_XY$barcode)
+rownames(souporcell_XY) <- souporcell_XY$barcode
+souporcell_XY$assignment <- as.character(souporcell_XY$assignment)
+ind <- which(souporcell_XY$assignment %ni% c(0,1))
+souporcell_XY$assignment[ind] <- "Doublet"
+souporcell_XY[which(souporcell_XY$assignment == "1"), "assignment"] <- "X"
+souporcell_XY[which(souporcell_XY$assignment == "0"), "assignment"] <- "Y"
+souporcell_XY <- souporcell_XY[-1, ]
 
+seu_zheng_clean@meta.data[,"Donor"] <- rep("X")
+seu_zheng_clean@meta.data$Donor[which(seu_zheng_clean@meta.data$LaneID == 3)] <- "Y"
+seu_zheng_clean@meta.data[rownames(souporcell_XY), "Donor"] <- souporcell_XY$assignment
